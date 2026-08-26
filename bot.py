@@ -17,9 +17,8 @@ PORT = int(os.getenv("PORT", 8080))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# চেক করার টেস্ট ইউআরএল (দ্রুত এবং নির্ভরযোগ্য)
 TEST_URL = "http://httpbin.org/ip"
-TIMEOUT = 5  # সেকেন্ড
+TIMEOUT = 5
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -53,21 +52,14 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ {len(proxies)}টি প্রোক্সি লোড হয়েছে। এখন /chk দিন চেক করার জন্য।")
 
 async def check_single_proxy(line):
-    """
-    একটি প্রোক্সি চেক করে।
-    HTTP, HTTPS, SOCKS4, SOCKS5 সাপোর্ট করে।
-    রিটার্ন করে: ভ্যালিড হলে লাইনটি, না হলে None।
-    """
     proxy_url = None
     connector = None
 
-    # ১. যদি সরাসরি প্রোটোকল উল্লেখ থাকে
     if line.startswith(('http://', 'https://')):
         proxy_url = line
     elif line.startswith(('socks4://', 'socks5://')):
         connector = ProxyConnector.from_url(line)
     else:
-        # ২. আপনার দেওয়া ফরম্যাট: host:port:user:pass
         parts = line.split(':')
         if len(parts) == 4:
             host, port, user, pwd = parts
@@ -80,18 +72,16 @@ async def check_single_proxy(line):
 
     try:
         if connector:
-            # SOCKS প্রোক্সি (aiohttp-socks ব্যবহার করে)
             async with aiohttp.ClientSession(connector=connector, timeout=ClientTimeout(total=TIMEOUT)) as sess:
                 async with sess.get(TEST_URL) as resp:
                     if resp.status == 200:
                         return line
         else:
-            # HTTP / HTTPS প্রোক্সি
             async with aiohttp.ClientSession(timeout=ClientTimeout(total=TIMEOUT)) as sess:
                 async with sess.get(TEST_URL, proxy=proxy_url) as resp:
                     if resp.status == 200:
                         return line
-    except (ClientConnectorError, ClientProxyConnectionError, asyncio.TimeoutError, Exception):
+    except:
         pass
     return None
 
@@ -102,9 +92,6 @@ async def check_proxies(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     status_msg = await update.message.reply_text(f"🔍 মোট {len(proxies)}টি প্রোক্সি চেক করা হচ্ছে (সুপার ফাস্ট)...")
-    valid = []
-
-    # একসাথে ৩০টির বেশি প্রোক্সি চেক করবে না (রিসোর্স বাঁচাতে)
     sem = asyncio.Semaphore(30)
 
     async def bounded_check(p):
@@ -118,11 +105,9 @@ async def check_proxies(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await status_msg.delete()
 
     if valid:
-        # মেমোরিতে ফাইল বানানো
         file_obj = io.StringIO()
         file_obj.write("\n".join(valid))
         file_obj.seek(0)
-
         await update.message.reply_document(
             document=file_obj,
             filename="valid_proxies.txt",
@@ -131,7 +116,7 @@ async def check_proxies(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ কোনো বৈধ প্রোক্সি পাওয়া যায়নি।")
 
-# ================== রেন্ডারের জন্য হেলথ চেক ==================
+# ================== হেলথ চেক (Render) ==================
 async def health_check():
     from aiohttp import web
     app = web.Application()
@@ -151,7 +136,7 @@ async def main():
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("chk", check_proxies))
-    application.add_handler(MessageHandler(filters.Document.TXT, handle_file))
+    application.add_handler(MessageHandler(filters.Document.FileExtension("txt"), handle_file))
 
     # বট পোলিং এবং হেলথ চেক একসাথে চালানো
     await asyncio.gather(
