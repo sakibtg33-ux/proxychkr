@@ -5,6 +5,11 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import asyncio
+import aiohttp
+from aiohttp_socks import ProxyConnector
+from aiohttp import ClientTimeout
+import io
 
 load_dotenv()
 
@@ -14,7 +19,7 @@ PORT = int(os.getenv("PORT", 8080))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ================== হেলথ চেক সার্ভার (সিঙ্ক্রোনাস) ==================
+# ================== হেলথ চেক সার্ভার ==================
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -22,14 +27,14 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"Proxy Bot is running!")
 
     def log_message(self, format, *args):
-        pass  # লগ কমাতে
+        pass  # লগ ফাঁকা রাখি
 
 def run_health_server():
     server = HTTPServer(('0.0.0.0', PORT), HealthCheckHandler)
     logger.info(f"✅ Health check server running on port {PORT}")
     server.serve_forever()
 
-# ================== বটের হ্যান্ডলার ==================
+# ================== বট হ্যান্ডলার ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🚀 Proxy Checker Bot\n\n"
@@ -61,12 +66,7 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['proxies'] = proxies
     await update.message.reply_text(f"✅ {len(proxies)}টি প্রোক্সি লোড হয়েছে। এখন /chk দিন চেক করার জন্য।")
 
-# ---------- প্রোক্সি চেক করার ফাংশন (অ্যাসিঙ্ক) ----------
-import asyncio
-import aiohttp
-from aiohttp_socks import ProxyConnector
-from aiohttp import ClientTimeout
-
+# ---------- প্রোক্সি চেক ----------
 TEST_URL = "http://httpbin.org/ip"
 TIMEOUT = 5
 
@@ -124,7 +124,6 @@ async def check_proxies(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await status_msg.delete()
 
     if valid:
-        import io
         file_obj = io.StringIO()
         file_obj.write("\n".join(valid))
         file_obj.seek(0)
@@ -136,25 +135,29 @@ async def check_proxies(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ কোনো বৈধ প্রোক্সি পাওয়া যায়নি।")
 
-# ================== মেইন ফাংশন ==================
+# ================== মেইন (ইভেন্ট লুপ ঠিক করা) ==================
 def main():
     if not BOT_TOKEN:
         raise ValueError("BOT_TOKEN সেট করা হয়নি! .env ফাইল বা এনভায়রনমেন্ট ভেরিয়েবল চেক করুন।")
 
-    # ১. হেলথ চেক সার্ভার একটি আলাদা থ্রেডে চালু করুন
+    # ১. হেলথ চেক থ্রেড চালু
     health_thread = threading.Thread(target=run_health_server, daemon=True)
     health_thread.start()
 
-    # ২. বট অ্যাপ্লিকেশন তৈরি করুন
+    # ২. বট অ্যাপ্লিকেশন তৈরি
     application = Application.builder().token(BOT_TOKEN).build()
-
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("chk", check_proxies))
     application.add_handler(MessageHandler(filters.Document.FileExtension("txt"), handle_file))
 
-    # ৩. পোলিং শুরু করুন (ব্লকিং)
-    logger.info("🚀 Bot is starting polling...")
-    application.run_polling()
+    # ৩. ম্যানুয়ালি ইভেন্ট লুপ তৈরি ও সেট করা (Python 3.14-এর জন্য)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        logger.info("🚀 Bot is starting polling...")
+        application.run_polling()
+    finally:
+        loop.close()
 
 if __name__ == "__main__":
     main()
