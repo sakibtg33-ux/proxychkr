@@ -138,7 +138,6 @@ async def main():
     application.add_handler(CommandHandler("chk", check_proxies))
     application.add_handler(MessageHandler(filters.Document.FileExtension("txt"), handle_file))
 
-    # বট পোলিং এবং হেলথ চেক একসাথে চালানো
     await asyncio.gather(
         application.run_polling(),
         health_check()
